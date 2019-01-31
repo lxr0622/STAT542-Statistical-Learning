@@ -1,0 +1,194 @@
+---
+title: "STAT542 HW6"
+author: "Xiruo Li (xiruoli2)"
+output: word_document
+---
+
+#Q1
+```{r}
+#read data
+data=read.csv("Melbourne_housing_FULL.csv")
+
+#correlation for numerical variables before cleaning
+numeric_var=c('Rooms','Bedroom2','Bathroom','Car','Landsize','BuildingArea','YearBuilt','Lattitude','Longtitude')
+numeric_data <- data[,numeric_var]
+numeric_data <- na.omit(numeric_data)
+library(corrplot)
+corrplot(cor(numeric_data),method="square")
+
+
+##data cleaning##
+
+#select my variables
+my_var=c('Price','Rooms','Car','Landsize','BuildingArea','YearBuilt','Lattitude','Longtitude','Type','Method','Regionname','Date','Distance','Propertycount')
+my_data=data[,my_var]
+
+#remove obs that Price is NA
+my_data=my_data[(!is.na(my_data$Price)),]
+
+#log transformation of Price
+library("ggplot2")
+#before transformation
+ggplot(my_data, aes(x = Price, fill = ..count..)) +
+  geom_histogram(binwidth = 10000) +
+  ggtitle("Histogram of original Price") +
+  ylab("Number of Houses") +
+  xlab("Price") + 
+  theme(plot.title = element_text(hjust = 0.5))
+#the distribution of Price is skewed and log transformation is required
+my_data$Price=log(my_data$Price)
+#after transformation
+ggplot(my_data, aes(x = Price, fill = ..count..)) +
+  geom_histogram(binwidth = 0.01) +
+  ggtitle("Histogram of transformed Price") +
+  ylab("Number of Houses") +
+  xlab("Price") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#replace NA with median for other numeric variables
+for (i in 3:8)
+{
+  my_data[,i][is.na(my_data[,i])] =median(my_data[,i], na.rm=TRUE)
+}
+
+#Method:remove the level that has 0 obs
+my_data$Method=as.character(my_data$Method)
+my_data$Method=as.factor(my_data$Method)
+
+#Regionname:remove #N/A
+my_data<-my_data[!(my_data$Regionname=="#N/A"),]
+my_data$Regionname=as.character(my_data$Regionname)
+my_data$Regionname=as.factor(my_data$Regionname)
+
+
+#convert Date,Distance,Propertycount into numeric
+my_data$Date=as.numeric(as.Date(my_data$Date, format="%d/%m/%Y"))
+my_data$Distance=as.numeric(my_data$Distance)
+my_data$Propertycount=as.numeric(my_data$Propertycount)
+
+#correlation for numerical variables in final data
+numeric_var2=c('Rooms','Car','Landsize','BuildingArea','YearBuilt','Lattitude','Longtitude','Date','Distance','Propertycount')
+numeric_data2 <- my_data[,numeric_var2]
+corrplot(cor(numeric_data2),method="square")
+
+#summary of final data
+summary(my_data)
+
+```
+
+
+
+#Q2
+```{r}
+library(clustMixType)
+library(compareGroups)
+#exclude Price
+cluster_data=my_data[,-1]
+#cluster into 5 groups
+set.seed(100)
+kpres <- kproto(cluster_data, 5)
+predicted.clusters <- predict(kpres, cluster_data)
+cluster_data$cluster <- predicted.clusters$cluster
+cluster_data$Price <- exp(my_data$Price)
+#comparison table
+group<-compareGroups(cluster~.,data=cluster_data)
+clustab<-createTable(group)
+clustab
+```
+
+
+#Q3
+```{r}
+#X and y, transfer each level of factors into dummy variables
+num_data = as.matrix(subset(my_data,select=-c(Type,Method,Regionname,Price)))
+factor_data= model.matrix(~ Type+Method+Regionname+0, my_data)
+X=cbind(num_data,factor_data)
+y=as.vector(my_data[,1])
+reg_data=as.data.frame(cbind(y,X))
+
+#split data
+smp_size <- floor(0.7 * nrow(reg_data))
+set.seed(100)
+train_ind <- sample(seq_len(nrow(reg_data)), size = smp_size)
+train <- reg_data[train_ind, ]
+test <- reg_data[-train_ind, ]
+trainX=as.matrix(train[,2:25])
+trainY=as.vector(train[,1])
+testX=as.matrix(train[,2:25])
+testY=as.vector(train[,1])
+
+#lasso
+library(glmnet)
+set.seed(100)
+cv_lasso=cv.glmnet(trainX,trainY, nfolds=10)
+coef(cv_lasso)
+pred_lasso=exp(predict(cv_lasso,testX))
+ggplot(as.data.frame(cbind(pred_lasso,exp(testY))), aes(x=as.data.frame(exp(testY)), y=as.data.frame(pred_lasso))) +geom_point()+geom_abline(intercept = 0, slope = 1)+labs(x="actual price",y="predict price",title="predict vs actual price in lasso")
+RMSE_lasso=sqrt(mean((pred_lasso-exp(testY))^2))
+Rsquare_lasso=cor(pred_lasso,exp(testY))^2
+print(paste("Best lambda for lasso is: ",cv_lasso$lambda.min))
+print(paste("RMSE for lasso is: ",RMSE_lasso))
+print(paste("R square for lasso is: ",Rsquare_lasso))
+
+#ridge
+library(MASS)
+set.seed(100)
+cv_ridge=cv.glmnet(trainX,trainY, nfolds=10,alpha=0)
+coef(cv_ridge)
+pred_ridge=exp(predict(cv_ridge,testX))
+ggplot(as.data.frame(cbind(pred_ridge,exp(testY))), aes(x=as.data.frame(exp(testY)), y=as.data.frame(pred_ridge))) +geom_point()+geom_abline(intercept = 0, slope = 1)+labs(x="actual price",y="predict price",title="predict vs actual price in ridge")
+RMSE_ridge=sqrt(mean((pred_ridge-exp(testY))^2))
+Rsquare_ridge=cor(pred_ridge,exp(testY))^2
+print(paste("Best lambda for ridge is: ",cv_ridge$lambda.min))
+print(paste("RMSE for ridge is: ",RMSE_ridge))
+print(paste("R square for ridge is: ",Rsquare_ridge))
+
+
+#KNN
+library(caret)
+set.seed(100)
+fit_knn=train(y~., data=train, trControl=trainControl(method="cv",number=10),tuneGrid=expand.grid(k = c(5, 10, 15, 20)), method="knn")
+fit_knn
+pred_knn=exp(predict(fit_knn,newdata=testX))
+ggplot(as.data.frame(cbind(pred_knn,exp(testY))), aes(x=as.data.frame(exp(testY)), y=as.data.frame(pred_knn))) +geom_point()+geom_abline(intercept = 0, slope = 1)+labs(x="actual price",y="predict price",title="predict vs actual price in knn")
+RMSE_knn=sqrt(mean((pred_knn-exp(testY))^2))
+Rsquare_knn=cor(pred_knn,exp(testY))^2
+print("The final values used for the KNN model is k=10")
+print(paste("RMSE for knn is: ",RMSE_knn))
+print(paste("R square for knn is: ",Rsquare_knn))
+
+
+
+```
+
+```{r,eval=FALSE}
+#Gradient Boosting
+library(gbm)
+library(plyr)
+set.seed(100)
+fit_gbm=train(y~., data=train, trControl=trainControl(method="cv",number=10),tuneGrid=expand.grid(n.trees = seq(100,500,100),interaction.depth=6,shrinkage=0.1,n.minobsinnode = 10), method="gbm")
+fit_gbm
+pred_gbm=exp(predict(fit_gbm,newdata=testX))
+ggplot(as.data.frame(cbind(pred_gbm,exp(testY))), aes(x=as.data.frame(exp(testY)), y=as.data.frame(pred_gbm))) +geom_point()+geom_abline(intercept = 0, slope = 1)+labs(x="actual price",y="predict price",title="predict vs actual price in GBM")
+RMSE_gbm=sqrt(mean((pred_gbm-exp(testY))^2))
+Rsquare_gbm=cor(pred_gbm,exp(testY))^2
+print("The final values used for the GBM model were n.trees = 500, interaction.depth = 6, shrinkage = 0.1 and n.minobsinnode = 10.")
+print(paste("RMSE for gbm is: ",RMSE_gbm))
+print(paste("R square for gbm is: ",Rsquare_gbm))
+```
+
+#Q4
+```{r,eval=FALSE}
+library(xgboost)
+set.seed(100)
+fit_xgb=train(y~., data=train, trControl=trainControl(method="cv",number=10),tuneGrid=expand.grid(nrounds =500,max_depth=6,eta=0.1,gamma=c(0.1,1),colsample_bytree=1,min_child_weight=10,subsample=1), method="xgbTree")
+fit_xgb
+pred_xgb=exp(predict(fit_xgb,newdata=testX))
+ggplot(as.data.frame(cbind(pred_xgb,exp(testY))), aes(x=as.data.frame(exp(testY)), y=as.data.frame(pred_xgb))) +geom_point()+geom_abline(intercept = 0, slope = 1)+labs(x="actual price",y="predict price",title="predict vs actual price in XGboost")
+RMSE_xgb=sqrt(mean((pred_xgb-exp(testY))^2))
+Rsquare_xgb=cor(pred_xgb,exp(testY))^2
+print("The final values used for the Xgboost model were nrounds = 500, max_depth = 6, eta = 0.1, gamma = 0.1, colsample_bytree = 1, min_child_weight = 10 and subsample= 1.")
+print(paste("RMSE for xgboost is: ",RMSE_xgb))
+print(paste("R square for xgboost is: ",Rsquare_xgb))
+```
+

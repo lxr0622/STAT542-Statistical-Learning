@@ -1,0 +1,290 @@
+---
+title: "STAT 542 HW 3"
+author: "Xiruo Li (xiruoli2)"
+output: word_document
+---
+#Question 1
+###(a)
+```{r}
+library(e1071)
+library(ElemStatLearn)
+data_train <- as.data.frame(zip.train)
+data_test <- as.data.frame(zip.test)
+#subset 4 and 9
+data_train49 <- data_train[ which(data_train$V1==4 | data_train$V1 == 9), ]
+data_test49 <- data_test[ which(data_test$V1==4 | data_test$V1 == 9), ]
+trainY=as.factor(data_train49[,1])
+testY=as.factor(data_test49[,1])
+#PCA,select first 10 features
+pca=prcomp(data_train49[,2:257])
+trainX=pca$x[,1:10]
+testX=predict(pca,newdata=data_test49[,2:257])[,1:10]
+#tune for SVM with kernal=linear
+svm_linear <- tune.svm(x=trainX,y=trainY, cost=10^(-2:2), kernel="linear", tunecontrol=tune.control(cross=10))
+svm_radial <- tune.svm(x=trainX,y=trainY, cost=10^(-2:2), gamma=c(0.5,1,2),kernel="radial", tunecontrol=tune.control(cross=10))
+svm_polynomial <- tune.svm(x=trainX,y=trainY, cost=10^(-2:2), gamma=c(0.5,1,2),kernel="polynomial",tunecontrol=tune.control(cross=10))
+print(svm_linear)
+print(svm_radial)
+print(svm_polynomial)
+```
+I choose three kernals: linear, radial, polynomial. I tune the cost in 10^(-2:2) for all kernels and gamma in (0.5,1,2) for radial/polynomial kernel. Then, I got the best model of each kernel by cross validation. Compared with these three model, kernel=polynomial with gamma=0.5, cost=0.01 has the lowest error,0.02544425.
+
+
+###(b)
+```{r}
+svm_best <- svm(x=trainX,y=trainY,kernel="polynomial", cost=0.01,gamma=0.5)
+summary(svm_best)
+pred<-predict(svm_best,testX)
+table(`Actual Class` = testY, `Predicted Class` =pred)
+```
+
+###c
+(1):Linear kernal has the lowest number of parameters and computational cost. It is suitable when there is a large number of features.However, it perform badly for the non-linear seperable case. For Polynomial kernel, although it has the most number of parameters and computational cost, it is suitable for nonlinear seperable case. For Radial kernel, it has fewer parameters than polynomial kernel and it is useful for nonlinear seperable case.
+(2):Cross validation has higher computational cost since, it train and test k times for k-fold cross validation. Also, it randomly divide data into train and test set, therefore, the result may have a high variance.
+
+
+#Question2
+###(a)
+```{r}
+###LDA###
+
+#read data
+train_data <- read.csv(file="C:/Users/Xiruo Li/Desktop/STAT542/HW/hw1/fashion-mnist_train.csv", header=TRUE, sep=",")
+test_data <- read.csv(file="C:/Users/Xiruo Li/Desktop/STAT542/HW/hw1/fashion-mnist_test.csv", header=TRUE, sep=",")
+Xtrain=train_data[,2:785]
+Ytrain=train_data[,1]
+Xtest=test_data[,2:785]
+Ytest=test_data[,1]
+
+#mean Uk and pooled covariance C
+train_split=split(as.data.frame(cbind(Ytrain,Xtrain)),Ytrain)
+Uk_total=c()
+Ck_total=array(dim=c(784,784,10))
+C=matrix(0,784,784)
+for (i in 1:10)
+{
+  Xk=as.matrix(as.data.frame(train_split[i]))[,2:785]
+  Uk=matrix(colMeans(Xk),1,784)
+  Uk_total=rbind(Uk_total,Uk)
+  Ck=t(Xk-matrix(1,6000,1)%*%Uk)%*%(Xk-matrix(1,6000,1)%*%Uk)/(nrow(Xk)-1)
+  Ck_total[,,i]=Ck
+  C=C+Ck
+}
+C=C/10
+C_inv=solve(C)
+
+#LDA prediction
+W=C_inv%*%t(Uk_total)
+bb=c()
+for (j in 1:10)
+{
+  bb=cbind(bb,-0.5*Uk_total[j,]%*%C_inv%*%Uk_total[j,]+log(0.1))
+}
+b=matrix(1,10000,1)%*%bb
+pred=apply(as.matrix(Xtest)%*%W+b, 1, which.max)-1
+
+#LDA accuracy
+correct = 0
+for(i in c(1:nrow(Xtest)))
+{
+  if(Ytest[i] == pred[i])
+  { 
+    correct = correct+1
+  }
+}
+accu = correct/nrow(Xtest)*100
+print(paste("Accuracy for LDA is:", accu,"%"))
+
+```
+
+###(b)
+```{r,eval=FALSE}
+###RDA###
+
+accu_list=c()
+for (alpha in c(0.1,0.3,0.5,0.7,0.9))
+{
+  Ck_inv_total=array(dim=c(784,784,10))
+  LG=array(dim=10)
+  W=matrix(0,784,10)
+  B=array(dim=10)
+  pred=c()
+  for (i in 1:10000)
+  {
+    f=rep(0,10)
+    if(i==1)
+    {
+      for (k in 1:10)
+      {
+          Ck=alpha*Ck_total[,,k]+(1-alpha)*C
+          Ck_inv_total[,,k]=solve(Ck)
+          LG[k]=-0.5*sum(log(eigen(Ck)[[1]]))
+          W[,k]=Ck_inv_total[,,k]%*%matrix(Uk_total[k,],784,1)
+          B[k]=-0.5*matrix(Uk_total[k,],1,784)%*%Ck_inv_total[,,k]%*%matrix(Uk_total[k,],784,1)
+          f[k]=LG[k]+as.matrix(Xtest[i,])%*%W[,k]+B[k]-0.5*as.matrix(Xtest[i,])%*%Ck_inv_total[,,k]%*%t(as.matrix(Xtest[i,]))
+      }
+      pred=c(pred,which.max(f)-1)
+    }
+    else
+    {
+      for (k in 1:10)
+      {
+        f[k]=LG[k]+as.matrix(Xtest[i,])%*%W[,k]+B[k]-0.5*as.matrix(Xtest[i,])%*%Ck_inv_total[,,k]%*%t(as.matrix(Xtest[i,]))
+      }
+      pred=c(pred,which.max(f)-1)
+    }
+  }
+    correct = 0
+    for(i in c(1:10000))
+    {
+      if(Ytest[i] == pred[i])
+      { 
+        correct = correct+1
+      }
+    }
+    accu = correct/10000*100
+    accu_list=c(accu_list,accu)
+    print(paste("Accuracy for QDA is:", accu,"%",",when alpha= ",alpha))
+}
+plot(c(0.1,0.3,0.5,0.7,0.9),accu_list,main="Accuracy with different alpha for RDA",xlab="alpha",ylab="accuracy")
+```
+
+###c
+For LDA, it has an assumption that the covariance are same for all of class. This method is simple since it only use one pooled covariance matrix. But in the real cases, different class may have different covariance matirx. In such a case, the accuracy for LDA predication is low. 
+For QDA, it abandon the assuption in LDA and use different covariance matrix for each class. Thus,it has better performance than LDA when covariance matrix is different for each class. But, the problem is that it has more paramters since it has k covariance matrix when there are k classes. Besides, since only the data in the kth class can be used to estimated kth covariance, when there is not enough data, it may has increased variance in the estimation of the optimal boundaries.
+For RDA, it's a compromise between LDA and QDA. It can be wiew as a more general method. When alpha is close to 0, it is close to LDA.Otherwise, it close to RDA fitting. When alpha increase, the error of training data will keep decreasing, since the model become flexible, like QDA. But the error for the test data first decrease, then increase, which shows a trade off between model complexity and the fitting of training data. We can get the best performance by tuning the alpha in RDA.
+
+
+#Question 3
+###(a)
+```{r}
+###SVM by QP_solve###
+
+library(quadprog)
+#set the data
+set.seed(1)
+n<-40
+p<-2
+xpos<-matrix(rnorm(n*p,mean=0,sd=1),n,p)
+xneg<-matrix(rnorm(n*p,mean=4,sd=1),n,p)
+x<-rbind(xpos,xneg)
+y<-matrix(c(rep(1,n),rep(-1,n)))
+
+#D,d,A,b0
+eps=10^(-5)
+Dmat=(y%*%t(y))*(x%*%t(x))+eps*diag(nrow(x))
+dvec=matrix(1,2*n)
+Amat=cbind(matrix(y,2*n,1),diag(2*n))
+bvec=matrix(0, 2*n+1, 1)
+
+#QP_solve for alphas
+alpha=solve.QP(Dmat,dvec,Amat,bvec,meq=1)
+alpha=matrix(alpha$solution,nrow=2*n)
+
+#support vector
+alpha_support=abs(alpha)>10^(-4)
+support_vec=x[alpha_support,]
+
+#beta and beta0
+beta_initial=matrix(0,2,80)
+for (i in 1:(2*n))
+{
+  beta_initial[,i]=alpha[i]*y[i]*t(x[i,])
+}
+beta=as.matrix(rowSums(beta_initial))
+beta0=-(max(t(beta)%*%t(x)[,41:80])+min(t(beta)%*%t(x)[,1:40]))/2
+
+#plot
+plot(x,col=ifelse(y>0,"red", "blue"),xlab = "X1", ylab = "X2",pch = 19, lwd = 3,main="SVM by QP_solve")
+legend("topleft", c("Positive","Negative"),pch=c(19,19),text.col=c("red", "blue"),col=c("red", "blue"))
+abline(a= -beta0/beta[2,1], b=-beta[1,1]/beta[2,1], lty=1)
+abline(a= (-beta0-1)/beta[2,1], b=-beta[1,1]/beta[2,1], lty=2)
+abline(a= (-beta0+1)/beta[2,1], b=-beta[1,1]/beta[2,1], lty=2)
+points(support_vec,col='black', cex=4) 
+```
+```{r}
+#by package e1071
+library(e1071)
+factor_y <- matrix(as.factor(y))
+svm.fit <- svm(factor_y ~ ., data = data.frame(x, factor_y),kernel='linear',scale=FALSE, cost = 10000)
+Beta <- t(t(svm.fit$coefs) %*% svm.fit$SV)
+Beta0 <- -svm.fit$rho
+
+plot(x,col=ifelse(y>0,"red", "blue"),xlab = "X1", ylab = "X2",pch = 19, lwd = 3,main="SVM by e1071")
+legend("topleft", c("Positive","Negative"),pch=c(19,19),text.col=c("red", "blue"),col=c("red", "blue"))
+abline(a= -Beta0/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=1)
+abline(a= (-Beta0-1)/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=2)
+abline(a= (-Beta0+1)/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=2)
+points(support_vec,col='black', cex=4)
+
+#comparison
+compare=cbind(c(beta,beta0),c(Beta,Beta0))
+colnames(compare)=c("QP_solve","e1071")
+rownames(compare)=c("beta1","beta2","beata0")
+compare
+```
+Both plots by QP_solve and e1071 show the suppot vectors and decision line. By comparison, beta and beta0 are similar for two methods.
+
+###b
+```{r}
+###QP_solve for non seperable case###
+
+set.seed(1)
+n<-40
+p<-2
+xpos<-matrix(rnorm(n*p,mean=0,sd=1),n,p)
+xneg<-matrix(rnorm(n*p,mean=1.5,sd=1),n,p)
+x<-rbind(xpos,xneg)
+y<-matrix(c(rep(1,n),rep(-1,n)))
+
+#c,D,d,A,b0
+c=1
+Dmat=(y %*% t(y) )* (x %*% t(x)) + eps*diag(nrow(x))
+dvec=matrix(1, nrow=n*2)
+Amat=cbind(matrix(y,2*n,1),diag(2*n),diag(-1,2*n))
+bvec<-rbind(matrix(0, 2*n+1, 1), matrix(-c, 2*n, 1))
+
+#QP_solve for alphas
+alpha=solve.QP(Dmat,dvec,Amat,bvec,meq=1)
+alpha=matrix(alpha$solution,nrow=2*n)
+
+#support vector
+alpha_support=abs(c-alpha)<10^(-4)
+support_vec=x[alpha_support,]
+
+#beta and beta0
+beta=as.matrix(rowSums(sapply(1:(2*n), function(i) alpha[i]*y[i]*t(x)[,i])))
+beta0=mean(sapply(which(alpha_support), function(i) t(y)[i]-t(as.matrix(beta))%*%t(x)[,i]))
+
+#plot
+plot(x,col=ifelse(y>0,"red", "blue"),xlab = "X1", ylab = "X2",pch = 19, lwd = 3,main="SVM by QP_solve(non seperable case)")
+legend("topleft", c("Positive","Negative"),pch=c(19,19),text.col=c("red", "blue"),col=c("red", "blue"))
+abline(a= -beta0/beta[2,1], b=-beta[1,1]/beta[2,1], lty=1)
+abline(a= (-beta0-1)/beta[2,1], b=-beta[1,1]/beta[2,1], lty=2)
+abline(a= (-beta0+1)/beta[2,1], b=-beta[1,1]/beta[2,1], lty=2)
+points(support_vec,col='black', cex=4)
+```
+
+```{r}
+#by package e1071
+library(e1071)
+factor_y <- matrix(as.factor(y))
+svm.fit <- svm(factor_y ~ ., data = data.frame(x, factor_y),kernel='linear',scale=FALSE, cost = 1)
+Beta <- t(t(svm.fit$coefs) %*% svm.fit$SV)
+Beta0 <- -svm.fit$rho
+
+plot(x,col=ifelse(y>0,"red", "blue"),xlab = "X1", ylab = "X2",pch = 19, lwd = 3,main="SVM by e1071 (non seperable case)")
+legend("topleft", c("Positive","Negative"),pch=c(19,19),text.col=c("red", "blue"),col=c("red", "blue"))
+abline(a= -Beta0/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=1)
+abline(a= (-Beta0-1)/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=2)
+abline(a= (-Beta0+1)/Beta[2,1], b=-Beta[1,1]/Beta[2,1], lty=2)
+points(support_vec,col='black', cex=4)
+
+#comparison
+compare=cbind(c(beta,beta0),c(Beta,Beta0))
+colnames(compare)=c("QP_solve","e1071")
+rownames(compare)=c("beta1","beta2","beata0")
+compare
+```
+Both plots by QP_solve and e1071 show the suppot vectors and decision line. By comparison, beta and beta0 are similar for two methods.
+

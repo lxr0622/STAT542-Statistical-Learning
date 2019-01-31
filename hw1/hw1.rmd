@@ -1,0 +1,195 @@
+---
+title: "STAT542 HW1"
+author: "Xiruo Li (xiruoli2)"
+output:
+  word_document: default
+  html_document: default
+---
+
+
+#Question 1
+###(a)
+```{r}
+library(pastecs)
+library(mlbench)
+library(corrplot)
+data(BostonHousing)
+#basic statistics of data
+stat.desc(BostonHousing)
+#convert chas into numeric
+BostonHousing$chas=as.numeric(BostonHousing$chas)-1
+#correlation
+corrplot(cor(BostonHousing),method="square")
+```
+```{r}
+#From the stat.desc, we can see the basic statistics of variables, like mean,median and variance.
+#Also, from the correlation table, we can find that rad and tax has a high correlation (0.91), which may cause the multicollinearity.So, we may drop the rad.
+```
+
+
+
+###(b)
+```{r}
+library(leaps)
+#best subset with bic
+best_subset <- regsubsets(medv ~ .,data=BostonHousing,nvmax=13)
+summary(best_subset)$bic
+which.min(summary(best_subset)$bic)
+coef(best_subset,11)
+```
+```{r}
+#best model: medv=-0.108crim+0.045zn+2.718chas-17.376nox+3.801rm-1.492dis+0.299rad-0.011tax-0.946ptratio+0.009b-0.522lstat.,which has the minimum BIC:-608.0353
+```
+
+###(c)
+```{r}
+#forward with aic
+fit_start <-lm(medv ~ 1,data=BostonHousing)
+forward <- step(fit_start,medv~crim+zn+indus+chas+nox+rm+age+dis+rad+tax+ptratio+b+lstat, direction="forward")
+summary(forward)
+#backward with cp
+backward <- regsubsets(medv ~ ., data=BostonHousing, nvmax = 13, method = "backward")
+summary(backward)$cp
+which.min(summary(backward)$cp)
+coef(backward,11)
+```
+```{r}
+# forward method using AIC, medv=-0.522lstat+3.801rm-0.946ptratio-1.492dis-17.376nox+2.718chas+0.009b+0.045zn-0.108crim+0.299rad-0.011tax,which has the minimum AIC: 1585.76
+# backward method using Cp, medv=-0.522lstat+3.801rm-0.946ptratio-1.492dis-17.376nox+2.718chas+0.009b+0.045zn-0.108crim+0.299rad-0.011tax,which has the minimum Cp:10.11455
+# Compared these three model, they have same variables and parameters.
+```
+
+###(d)
+```{r}
+# Backward and forward yield a singel model and they are faster than best subset method since they add or remove one predictor at a time and do not access all models. But,they may miss the best model.
+# For the best subset model, since it access all of possible models, it will give us the best model for each number of parameters. But,if the number of parameter is too big, it may take too much time. 
+# If I got different results among these method, I will choose the model from best subset model, because it go over all of possible cases.
+```
+
+###(e)
+```{r}
+# All of these three criteria make a trade off between goodness of fit and complexity. BIC makes more penalty on the bigger model and it pick a smaller model than AIC. Also, Cp performs similarly to AIC.
+# If I got different results among these criteria, I'd like to choose BIC since I prefer simpler model.
+```
+
+
+
+#Question2
+###(a)
+```{r}
+#read data
+train_data <- read.csv(file="C:/Users/Xiruo Li/Desktop/STAT542/HW/hw1/fashion-mnist_train.csv", header=TRUE, sep=",")
+test_data <- read.csv(file="C:/Users/Xiruo Li/Desktop/STAT542/HW/hw1/fashion-mnist_test.csv", header=TRUE, sep=",")
+```
+```{r}
+# Summary: There are 60000 and 10000 observations in the traning and test data. Each observation has 784 pixels and 1 label.
+# Research goal: use KNN algorithm to fit the train data and predict the label of test data according to the pixel value.
+```
+
+###(b)&(c)&(d)
+```{r}
+#Euclidean distance function
+euclideanDist <- function(a, b)
+{
+  d = 0
+  for(i in c(2:(length(a))))
+  {
+    d = d + (a[[i]]-b[[i]])^2
+  }
+  d = sqrt(d)
+  return(d)
+}
+
+#KNN function
+KNN <- function(test_data, train_data)
+{
+  #prediction vector 
+  pred = c() 
+  #loop over the test data
+  for(i in c(1:nrow(test_data)))
+  {  
+    dist =c() 
+    label =c()
+    #loop over train data 
+    for(j in c(1:nrow(train_data)))
+    {
+      #add distance
+      dist <- c(dist, euclideanDist(test_data[i,], train_data[j,]))
+      #adding label
+      label <- c(label, train_data[j,1])
+    }
+    #get the k neighbours and the most frequent label in the k cases
+    k_neighbours <- data.frame(label, dist) 
+    k_neighbours <- k_neighbours[order(k_neighbours$dist),]
+    k_pred = c()
+    for(k in k_list)
+    {
+      k_pred <- cbind(k_pred,(as.numeric(names(sort(table(k_neighbours[1:k,1]),decreasing = TRUE))))[1])
+    }
+    pred <- rbind(pred,k_pred)
+  }
+  return(pred)
+}
+
+#Accuracy function
+Accuracy <- function(test_data,pred)
+{
+  accu_list=c()
+  for (k in 1:6)
+  {
+    correct = 0
+    for(i in c(1:nrow(test_data)))
+    {
+      if(test_data[i,1] == pred[i,k])
+      { 
+        correct = correct+1
+      }
+    }
+    accu = correct/nrow(test_data) * 100 
+    accu_list=c(accu_list,accu)
+    
+  }
+  print(paste("The accuracy is:",accu_list,"when k=",k_list))
+  plot(k_list,accu_list,main="Accuracy with different k in KNN",xlab="k",ylab="accuracy")
+}
+
+
+#Select part of sample randomly
+train_data_rand=train_data[sample(nrow(train_data),6000,replace=FALSE),]
+test_data_rand=test_data[sample(nrow(test_data),500,replace=FALSE),]
+
+#PCA
+pca=prcomp(train_data_rand[,2:785])
+train_data_pca=cbind(train_data_rand[,1],pca$x[,1:10])
+test_data_pca=cbind(test_data_rand[,1],predict(pca,newdata=test_data_rand[,2:785])[,1:10])
+
+
+#implement function
+k_list=c(1,5,10,30,50,100)
+predictions <- KNN(test_data_pca, train_data_pca)
+accuray_rate <- Accuracy(test_data_pca,predictions)
+
+```
+
+
+```{r}
+##part(b)
+#I choose Euclidean distance as the distance in KNN.Besides, I have functions for KNN algorithm and Accuracy. 
+#To get the greatest frequency among k labels, I use the function "sort(table())".When there is a tie, this function rank the smallest label as the 1st. 
+#But, I found this program run too slowly. Thus, I make some modifications, which will be illustrated in part (d). 
+```
+
+```{r}
+##part(d)
+#(1)I randomly pick 6000 samples from train set and 500 samples from test set, which are my new train set and test set. Because the original dataset is too large to run in a short time. And the change of sample size to such a degree will not decrease much accuracy. 
+#(2)I use PCA and pick up the first 10 components.This method will reduce the diminsion in a large degree.
+```
+
+```{r}
+##part(c)
+#I use k=1,5,10,30,50,100. And I found that the accuracy increase firstly and decrease later. When k increase, the model complexity decrease(bias increase and variance decreae). There is a bias-variance trade off to get the best performance.
+#When k=10, I got the optimal performance(accuracy=78.4%). In this case, the d.f=n/k=6000/10=600.
+```
+
+
+

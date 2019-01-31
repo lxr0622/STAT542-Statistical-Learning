@@ -1,0 +1,275 @@
+---
+title: "STAT542HW5"
+author: "Xiruo Li (xiruoli2)"
+output: word_document
+---
+#Question 1
+###(1)
+```{r}
+#function for gini score
+Gini=function(x,y,weight,cut_point)
+{
+  #left
+  left_index = (x<=cut_point)
+  left_weight=weight[left_index]
+  left_pred=y[left_index]
+  left_p=sum(left_weight[left_pred==1])/sum(left_weight)
+  left_gini=left_p*(1-left_p)
+  
+  #right
+  right_weight=weight[!left_index]
+  right_pred=y[!left_index]
+  right_p=sum(right_weight[right_pred==1])/sum(right_weight)
+  right_gini=right_p*(1-right_p)
+  
+  #gini score,fL,fR
+  gini_score=-((sum(left_weight)/sum(weight))*left_gini+(sum(right_weight)/sum(weight))*right_gini)
+  fL=sum(left_weight*left_pred)/sum(left_weight)
+  fR=sum(right_weight*right_pred)/sum(right_weight)
+  return(list(gini_score = gini_score,fL = fL, fR = fR))
+}
+
+# stump model
+stump=function(x,y,weight)
+{
+  cut_point_list=sort(unique(x))
+  gini_score_list=rep(0,length(cut_point_list))
+  for (i in c(1:length(cut_point_list)))
+  {
+    func=Gini(x,y,weight,cut_point_list[i])
+    gini_score_list[i]=func$gini_score
+  }
+  max_gini_score=max(gini_score_list,na.rm = TRUE)
+  cut_point=max(cut_point_list[which(gini_score_list==max_gini_score)],na.rm = TRUE)
+  func=(Gini(x,y,weight,cut_point))
+  fL=func$fL
+  fR=func$fR
+  return(list(cut_point=cut_point,fL = sign(fL), fR = sign(fR)))
+}
+
+
+```
+
+###(2)
+```{r}
+boost=function(x,y,weight)
+{
+  est=stump(x,y,weight)
+  # print(weight)
+  cut=est$cut_point
+  # print(cut)
+  fL=est$fL
+  fR=est$fR
+  y_pred=rep(0,length(x))
+  y_pred[x<=cut]=fL
+  y_pred[x>cut]=fR
+  err=sum(weight*(y_pred!=y))
+  # print(err)
+  
+  if(err<=0)
+  {
+    return(list(cut_point=cut,fL=fL,fR=fR,alpha=1,error=err,weight=weight))
+  }
+  else
+  {
+    alpha=0.5*log((1-err)/err)
+  }
+  # print(alpha)
+  weight=weight*exp(-alpha*y*y_pred)
+  
+  return(list(cut_point=cut,fL=fL,fR=fR,alpha=alpha,error=err,weight=weight))
+}
+
+
+adaboost=function(x,y,iter)
+{
+  weight=rep(1,length(x))/length(x)
+  cuts=rep(0,iter)
+  fLs=rep(0,iter)
+  fRs=rep(0,iter)
+  alphas=rep(0,iter)
+  errs=rep(0,iter)
+  for (i in 1:iter)
+  {
+    est=boost(x,y,weight)
+    cuts[i]=est$cut_point
+    fLs[i]=est$fL
+    fRs[i]=est$fR
+    alphas[i]=est$alpha
+    errs[i]=est$error
+    if(est$error<=0)
+    {
+      break
+    }
+    weight=est$weight/sum(est$weight)
+    # print(weight)
+  }
+  
+  
+  return(list(cut_point=cuts,fL=fLs,fR=fRs,alpha=alphas,error=errs))
+}
+
+
+n = 300
+iter=seq(1,100,by=1)
+x_train = runif(n)
+y_train =(rbinom(n,1,(sin(4*pi*x_train)+1)/2)-0.5)*2
+x_test = runif(n)
+y_test =(rbinom(n,1,(sin(4*pi*x_test)+1)/2)-0.5)*2
+pred_train=rep(0,n)
+pred_test=rep(0,n)
+err_train=rep(0,length(iter))
+err_test=rep(0,length(iter))
+uperr_train=rep(0,length(iter))
+  
+ad=adaboost(x_train,y_train,iter=length(iter))
+cut=ad$cut_point
+fL=ad$fL
+fR=ad$fR
+alpha=ad$alpha
+gamma=0.5-ad$error
+
+for (i in 1:length(iter))
+{
+  weakpred_train=rep(0,n)
+  weakpred_train[x_train<=cut[i]]=fL[i]
+  weakpred_train[x_train>cut[i]]=fR[i]
+  pred_train=pred_train+alpha[i]*weakpred_train
+  err_train[i]=1-mean(y_train==sign(pred_train))
+  uperr_train[i]=exp(-2*sum(sapply(1:i, function(x) (gamma[x]^2))))
+
+  weakpred_test=rep(0,n)
+  weakpred_test[x_test<=cut[i]]=fL[i]
+  weakpred_test[x_test>cut[i]]=fR[i]
+  pred_test=pred_test+alpha[i]*weakpred_test
+  err_test[i]=1-mean(y_test==sign(pred_test))
+}
+
+plot(iter,err_train,type = 'l',col='red',ylim=c(0,1),xlab="iteration",ylab="error") 
+lines(iter,err_test,col='blue',lty=1) 
+lines(iter,uperr_train,col='green',lty=1)
+legend("topright",legend=c("train error","test error","exponential train error upper bound"), col=c("red", "blue","green"),lty=c(1,1,1))
+```
+The train error and test error decrease at the first several iterations, then the error become stable (around 0.2). And test error is higher than train error. Besides, exponential error upper bound decrease exponentially and it's always higher than train error.
+
+
+#Question3
+```{r}
+##read data##
+library(readr)
+data <- read_delim("the-tate-collection.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+
+
+
+##data cleaning##
+
+
+#remove variables: id(all of id are unique),artist(same function as artist id),dateText, thumbnailCopyright, thumbnailUrl, Url(these 4 variables contain too much noisy and useless information for cluster),depth(too many NA)
+data = data[, -1]
+data = data[, -2]
+data = data[, -5]
+data = data[, -12]
+data = data[, -14]
+data = data[, -14]
+data = data[, -14]
+
+
+#convert character variable into categorical variable:
+
+#artistRole:artist=1, others=0
+data$artistRole[which(data$artistRole != "artist")] = 0
+data$artistRole[which(data$artistRole == "artist")] = 1
+data$artistRole=as.factor(data$artistRole)
+
+#artistID:the most frequent case: 558=1, others=0
+data$artistId[which(data$artistId != 558)] = 0
+data$artistId[which(data$artistId == 558)] = 1
+data$artistId=as.factor(data$artistId)
+
+#title:first 5 frequent cases have the same meaning: "no title", which I make as 0. others=1.
+data$title[which(data$title!="[title not known]"& data$title!="Blank"& data$title!="[blank]" &data$title!="[no title]"& data$title!="Untitled")] =1
+data$title[which(data$title=="[title not known]"|data$title=="Blank"|data$title=="[blank]"|data$title=="[no title]"|data$title=="Untitled")] =0
+data$title=as.factor(data$title)
+
+#medium:the most 5 frequent cases named as 1-5,others =6
+data$medium[which(data$medium!="Graphite on paper"& data$medium!="Oil paint on canvas"& data$medium!="Screenprint on paper" &data$medium!="Lithograph on paper"& data$medium!="Watercolour on paper")] =6
+data$medium[is.na(data$medium)] = 6
+data$medium[which(data$medium=="Graphite on paper")]=1
+data$medium[which(data$medium=="Oil paint on canvas")]=2
+data$medium[which(data$medium=="Screenprint on paper")]=3
+data$medium[which(data$medium=="Lithograph on paper")]=4
+data$medium[which(data$medium=="Watercolour on paper")]=5
+data$medium=as.factor(data$medium)
+
+#creditLine:the most frequent case=1,others=0
+data$creditLine[which(data$creditLine!="Accepted by the nation as part of the Turner Bequest 1856")]=0
+data$creditLine[is.na(data$creditLine)] = 0
+data$creditLine[which(data$creditLine=="Accepted by the nation as part of the Turner Bequest 1856")]=1
+data$creditLine=as.factor(data$creditLine)
+
+#dimensions:support=1, others=0
+data$dimensions = gsub(":.*$", "", data$dimensions)
+data$dimensions[which(data$dimensions!="support")]=0
+data$dimensions[is.na(data$dimensions)] = 0
+data$dimensions[which(data$dimensions=="support")]=1
+data$dimensions=as.factor(data$dimensions)
+
+
+#nomarlize numeric variables
+
+#year
+data$year = (data$year-mean(data$year, na.rm=TRUE))/sd(data$year, na.rm=TRUE)
+data$year[is.na(data$year)] = 0 
+
+#acquisitionYear
+data$acquisitionYear = (data$acquisitionYear-mean(data$acquisitionYear, na.rm=TRUE))/sd(data$acquisitionYear, na.rm=TRUE)
+data$acquisitionYear[is.na(data$acquisitionYear)] = 0 
+
+#wdith
+data$width = (data$width-mean(data$width, na.rm=TRUE))/sd(data$width, na.rm=TRUE)
+data$width[is.na(data$width)] = 0 
+
+#height
+data$height = (data$height-mean(data$height, na.rm=TRUE))/sd(data$height, na.rm=TRUE)
+data$height[is.na(data$height)] = 0 
+
+
+#other cleaning:
+
+#accession_number:extract the prefix
+library(stringr)
+data$accession_number = str_extract(data$accession_number, "[A-Z]+")
+data$accession_number=as.factor(data$accession_number)
+
+#units:mm=1,na=0
+data$units[is.na(data$units)] = 0
+data$units[which(data$units == "mm")] = 1
+data$units=as.factor(data$units)
+
+#inscription:date inscribed=1,na=0
+data$inscription[which(data$inscription == "date inscribed")] = 1
+data$inscription[is.na(data$inscription)] = 0
+data$inscription=as.factor(data$inscription)
+
+data <- as.data.frame(data)
+
+
+
+
+
+##cluster##
+
+# k prototypes clustering
+library(clustMixType)
+library(compareGroups)
+kpres <- kproto(data, 4)
+predicted.clusters <- predict(kpres, data)
+data$cluster <- predicted.clusters$cluster
+#table
+group<-compareGroups(cluster~.,data=data)
+clustab<-createTable(group)
+clustab
+#plot for each var
+clprofiles(kpres,data)
+
+```
